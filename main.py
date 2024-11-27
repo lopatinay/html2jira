@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup, NavigableString
 
-from tag_converter.tag_converter_strategy import StrategyRegistry
+from tag_converter.tag_converter_strategy import StrategyRegistry, TagConverterStrategy
 
 
 class HtmlToJiraWikiConverter:
@@ -42,8 +42,15 @@ class HtmlToJiraWikiConverter:
 
 
 if __name__ == "__main__":
+    class CustomImgConverter(TagConverterStrategy):
+        tag_name = 'img'
+
+        def convert(self, tag) -> str:
+            return "[^Jira.png]"
+
     registry = StrategyRegistry()
     registry.register_all()
+    registry.register("img", CustomImgConverter())
     converter = HtmlToJiraWikiConverter(registry)
 
     with open("templates/lists.html") as fd:
