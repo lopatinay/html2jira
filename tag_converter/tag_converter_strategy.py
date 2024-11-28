@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from bs4 import NavigableString
+from bs4 import NavigableString, Tag
 
 from style_processor.style_processor import StyleProcessor
 
@@ -21,14 +21,85 @@ class TagConverterStrategy(ABC):
         pass
 
 
+class DivConverter(TagConverterStrategy):
+    tag_name = 'div'
+
+    def convert(self, tag) -> str:
+        return tag.decode_contents() + "\n"
+
+
+class ULConverter(TagConverterStrategy):
+    tag_name = 'ul'
+
+    def convert(self, tag, process_node, depth):
+        result = ''
+
+        for child in tag.contents:
+            if isinstance(child, Tag) and child.name == 'li':
+                r = LIConverter().convert(child, process_node, depth + 1)
+                result += f"\n{r}"
+            else:
+                result += process_node(child, depth)
+        return result
+
+
+class OLConverter(TagConverterStrategy):
+    tag_name = 'ol'
+
+    def convert(self, tag, process_node, depth):
+        result = ''
+
+        for child in tag.contents:
+            if isinstance(child, Tag) and child.name == 'li':
+                r = LIConverter().convert(child, process_node, depth + 1)
+                result += f"\n{r}"
+            else:
+                result += process_node(child, depth)
+        return result
+
+
+class LIConverter(TagConverterStrategy):
+    tag_name = 'li'
+
+    def convert(self, tag, process_node, depth):
+        if tag.parent.name == 'ol':
+            prefix_char = '#'
+        else:
+            prefix_char = '*'
+
+        indent = prefix_char * depth
+
+        # Обрабатываем содержимое элемента <li>
+        content = ''
+        for child in tag.contents:
+            if isinstance(child, Tag) and child.name in ['ul', 'ol']:
+                if child.name == 'ul':
+                    content += ULConverter().convert(child, process_node, depth)
+                elif child.name == 'ol':
+                    content += OLConverter().convert(child, process_node, depth)
+            else:
+                content += process_node(child, depth)
+
+        result = f"{indent} {content}"
+        return result
+
+
 class TableConverter(TagConverterStrategy):
     tag_name = 'table'
 
-    def convert(self, tag, process_node) -> str:
+    def convert(self, tag, process_node, depth) -> str:
         result = ""
-        for child in tag.children:
-            if child.name in ['thead', 'tbody', 'tr']:
-                result += process_node(child)
+        for child in tag.contents:
+            if child.name in {'thead', 'tbody'}:
+                for sub_child in child.contents:
+                    if isinstance(sub_child, Tag) and sub_child.name == 'tr':
+                        result += RowConverter().convert(sub_child, process_node) + "\n"
+            else:
+                if isinstance(child, Tag) and child.name == 'tr':
+                    result += RowConverter().convert(child, process_node) + "\n"
+                else:
+                    result += process_node(child)
+
         return result
 
 
@@ -36,15 +107,19 @@ class RowConverter(TagConverterStrategy):
     tag_name = 'tr'
 
     def convert(self, tag, process_node) -> str:
-        is_header_row = any(child.name == 'th' for child in tag.children)
+        is_header_row = False
+
         row_content = ""
         for child in tag.children:
-            if child.name in ['td', 'th']:
-                cell_content = process_node(child).strip()
-                separator = "||" if is_header_row else "|"
-                row_content += f"{separator}{cell_content}"
-        separator = "||" if is_header_row else "|"
-        row_content += f"{separator}\n"
+            if isinstance(child, Tag) and child.name == 'td':
+                row_content += "|"
+                row_content += CellConverter().convert(child, process_node)
+            elif isinstance(child, Tag) and child.name == 'th':
+                is_header_row = Tag
+                row_content += "||"
+                row_content += HeaderCellConverter().convert(child, process_node)
+
+        row_content += "||" if is_header_row else "|"
         return row_content
 
 
@@ -68,7 +143,7 @@ class HeadingConverter(TagConverterStrategy):
     tag_name = 'h1'
 
     def convert(self, tag) -> str:
-        return f"h1. {tag.text} {self.get_styles(tag)}\n"
+        return f"h1. {tag.text}{self.get_styles(tag)}\n"
 
 
 class H2Converter(TagConverterStrategy):
@@ -76,7 +151,7 @@ class H2Converter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"h2. {content} {self.get_styles(tag)}\n"
+        return f"h2. {content}{self.get_styles(tag)}\n"
 
 
 class H3Converter(TagConverterStrategy):
@@ -84,7 +159,7 @@ class H3Converter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"h3. {content} {self.get_styles(tag)}\n"
+        return f"h3. {content}{self.get_styles(tag)}\n"
 
 
 class H4Converter(TagConverterStrategy):
@@ -92,7 +167,7 @@ class H4Converter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"h4. {content} {self.get_styles(tag)}\n"
+        return f"h4. {content}{self.get_styles(tag)}\n"
 
 
 class H5Converter(TagConverterStrategy):
@@ -100,7 +175,7 @@ class H5Converter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"h5. {content} {self.get_styles(tag)}\n"
+        return f"h5. {content}{self.get_styles(tag)}\n"
 
 
 class H6Converter(TagConverterStrategy):
@@ -108,22 +183,21 @@ class H6Converter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"h6. {content} {self.get_styles(tag)}\n"
+        return f"h6. {content}{self.get_styles(tag)}\n"
 
 
-class BoldConverter(TagConverterStrategy):
+class BConverter(TagConverterStrategy):
     tag_name = 'b'
 
     def convert(self, tag) -> str:
-        content = tag.text.strip()
-        return f"*{content}* {self.get_styles(tag)}".strip()
+        return f"*{tag.text}*{self.get_styles(tag)}".strip()
 
 
 class ParagraphConverter(TagConverterStrategy):
     tag_name = 'p'
 
     def convert(self, tag) -> str:
-        return f"\n{tag.decode_contents()} {self.get_styles(tag)}\n"
+        return f"\n{tag.decode_contents()}{self.get_styles(tag)}\n"
 
 
 class AnchorConverter(TagConverterStrategy):
@@ -133,7 +207,13 @@ class AnchorConverter(TagConverterStrategy):
         href = tag.get('href', '#')
         text = tag.text.strip() or "link"
 
-        return f"[{text}|{href}] {self.get_styles(tag)}".strip()
+        if "#" in href:
+            return f"[#{text}]{self.get_styles(tag)}".strip()
+        elif "mailto" in href:
+            return f"[{href}]{self.get_styles(tag)}".strip()
+        elif "file" in href:
+            return f"[{href}]{self.get_styles(tag)}".strip()
+        return f"[{text}|{href}]{self.get_styles(tag)}".strip()
 
 
 class IConverter(TagConverterStrategy):
@@ -141,7 +221,7 @@ class IConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"_{content}_ {self.get_styles(tag)}".strip()
+        return f"_{content}_{self.get_styles(tag)}".strip()
 
 
 class ImgConverter(TagConverterStrategy):
@@ -150,7 +230,24 @@ class ImgConverter(TagConverterStrategy):
     def convert(self, tag) -> str:
         src = tag.get('src', '#')
         alt = tag.get('alt', 'image')
-        return f"!{src}|alt={alt}! {self.get_styles(tag)}".strip()
+        return f"!{src}|alt={alt}!{self.get_styles(tag)}".strip()
+
+
+class CodeConverter(TagConverterStrategy):
+    tag_name = 'code'
+
+    def convert(self, tag) -> str:
+        content = tag.text.strip()
+        return f"{{code}}\n{content}\n{{code}}{self.get_styles(tag)}"
+
+
+class InsertedConverter(TagConverterStrategy):
+    tag_name = 'u'
+
+    def convert(self, tag) -> str:
+        text = tag.text.strip()
+
+        return f"+{text}+{self.get_styles(tag)}".strip()
 
 
 class AbbreviationConverter(TagConverterStrategy):
@@ -159,7 +256,7 @@ class AbbreviationConverter(TagConverterStrategy):
     def convert(self, tag) -> str:
         text = tag.text.strip()
 
-        return f"_({text})_ {self.get_styles(tag)}".strip()
+        return f"_({text})_{self.get_styles(tag)}".strip()
 
 
 class AcronymConverter(TagConverterStrategy):
@@ -167,7 +264,7 @@ class AcronymConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         text = tag.text.strip()
-        return f"*{text}* {self.get_styles(tag)}".strip()
+        return f"*{text}*{self.get_styles(tag)}".strip()
 
 
 class AddressConverter(TagConverterStrategy):
@@ -175,7 +272,7 @@ class AddressConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.decode_contents().strip()
-        return f"\n{{quote}}\n{content} {self.get_styles(tag)}\n{{quote}}\n".strip()
+        return f"\n{{quote}}\n{content}{self.get_styles(tag)}\n{{quote}}\n".strip()
 
 
 class BDOConverter(TagConverterStrategy):
@@ -186,10 +283,10 @@ class BDOConverter(TagConverterStrategy):
         direction = tag.get("dir", "").lower()
 
         if direction == "rtl":
-            return f"{{direction:rtl}}{content}{{direction}} {self.get_styles(tag)}".strip()
+            return f"{{direction:rtl}}{content}{{direction}}{self.get_styles(tag)}".strip()
         elif direction == "ltr":
-            return f"{{direction:ltr}}{content}{{direction}} {self.get_styles(tag)}".strip()
-        return f"{content} {self.get_styles(tag)}".strip()
+            return f"{{direction:ltr}}{content}{{direction}}{self.get_styles(tag)}".strip()
+        return f"{content}{self.get_styles(tag)}".strip()
 
 
 class BigConverter(TagConverterStrategy):
@@ -197,7 +294,7 @@ class BigConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{{+{content}+}} {self.get_styles(tag)}".strip()
+        return f"{{+{content}+}}{self.get_styles(tag)}".strip()
 
 
 class BlockquoteConverter(TagConverterStrategy):
@@ -205,7 +302,17 @@ class BlockquoteConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.decode_contents().strip()
-        return f"\n{{quote}}\n{content} {self.get_styles(tag)}\n{{quote}}\n".strip()
+        return f"bq. {content}{self.get_styles(tag)}".strip()
+
+
+class QuoteConverter(TagConverterStrategy):
+    tag_name = 'q'
+
+    def convert(self, tag) -> str:
+        content = tag.decode_contents().strip()
+        s = self.get_styles(tag)
+        return f"\n{{quote}}\n{content}\n{{quote}}\n".strip()
+
 
 
 class CaptionConverter(TagConverterStrategy):
@@ -213,7 +320,7 @@ class CaptionConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{{center}}{content} {self.get_styles(tag)}{{center}}".strip()
+        return f"{{center}}{content}{self.get_styles(tag)}{{center}}".strip()
 
 
 class CiteConverter(TagConverterStrategy):
@@ -221,15 +328,7 @@ class CiteConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"_{content}_ {self.get_styles(tag)}".strip()
-
-
-class CodeConverter(TagConverterStrategy):
-    tag_name = 'code'
-
-    def convert(self, tag) -> str:
-        content = tag.text.strip()
-        return f"{{{{{content}}}}} {self.get_styles(tag)}".strip()
+        return f"??{content}??{self.get_styles(tag)}".strip()
 
 
 class DDConverter(TagConverterStrategy):
@@ -237,7 +336,7 @@ class DDConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f" : {content} {self.get_styles(tag)}".strip()
+        return f" : {content}{self.get_styles(tag)}".strip()
 
 
 class DelConverter(TagConverterStrategy):
@@ -245,7 +344,7 @@ class DelConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"-{content}- {self.get_styles(tag)}".strip()
+        return f"-{content}-{self.get_styles(tag)}".strip()
 
 
 class DfnConverter(TagConverterStrategy):
@@ -253,15 +352,7 @@ class DfnConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"_{content}_ {self.get_styles(tag)}".strip()
-
-
-class DivConverter(TagConverterStrategy):
-    tag_name = 'div'
-
-    def convert(self, tag) -> str:
-        content = tag.decode_contents().strip()
-        return f"{content} {self.get_styles(tag)}".strip()
+        return f"_{content}_{self.get_styles(tag)}".strip()
 
 
 class DlConverter(TagConverterStrategy):
@@ -269,7 +360,7 @@ class DlConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.decode_contents().strip()
-        return f"{{quote}}\n{content} {self.get_styles(tag)}\n{{quote}}".strip()
+        return f"{{quote}}\n{content}{self.get_styles(tag)}\n{{quote}}".strip()
 
 
 class DTConverter(TagConverterStrategy):
@@ -277,15 +368,7 @@ class DTConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"*{content}* {self.get_styles(tag)}".strip()
-
-
-class QConverter(TagConverterStrategy):
-    tag_name = 'q'
-
-    def convert(self, tag) -> str:
-        content = tag.text.strip()
-        return f"\"{content}\" {self.get_styles(tag)}".strip()
+        return f"*{content}*{self.get_styles(tag)}".strip()
 
 
 class EmConverter(TagConverterStrategy):
@@ -293,7 +376,7 @@ class EmConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"_{content}_ {self.get_styles(tag)}".strip()
+        return f"_{content}_{self.get_styles(tag)}".strip()
 
 
 class SampConverter(TagConverterStrategy):
@@ -301,7 +384,7 @@ class SampConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{{{{{content}}}}} {self.get_styles(tag)}".strip()
+        return f"{{{{{content}}}}}{self.get_styles(tag)}".strip()
 
 
 class SpanConverter(TagConverterStrategy):
@@ -309,7 +392,7 @@ class SpanConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{content} {self.get_styles(tag)}".strip()
+        return f"{content}{self.get_styles(tag)}".strip()
 
 
 class StrikeConverter(TagConverterStrategy):
@@ -317,7 +400,7 @@ class StrikeConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"-{content}- {self.get_styles(tag)}".strip()
+        return f"-{content}-{self.get_styles(tag)}".strip()
 
 
 class StrongConverter(TagConverterStrategy):
@@ -325,7 +408,7 @@ class StrongConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"*{content}* {self.get_styles(tag)}".strip()
+        return f"*{content}*{self.get_styles(tag)}".strip()
 
 
 class SubConverter(TagConverterStrategy):
@@ -333,7 +416,7 @@ class SubConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{{sub:{content}}} {self.get_styles(tag)}".strip()
+        return f"~{content}~{self.get_styles(tag)}".strip()
 
 
 class SupConverter(TagConverterStrategy):
@@ -341,14 +424,14 @@ class SupConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{{sup:{content}}} {self.get_styles(tag)}".strip()
+        return f"^{content}^{self.get_styles(tag)}".strip()
 
 
 class HRConverter(TagConverterStrategy):
     tag_name = 'hr'
 
     def convert(self, tag) -> str:
-        return f"---- {self.get_styles(tag)}".strip()
+        return f"\n----{self.get_styles(tag)}\n"
 
 
 class InsConverter(TagConverterStrategy):
@@ -356,7 +439,7 @@ class InsConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"+{content}+ {self.get_styles(tag)}".strip()
+        return f"+{content}+{self.get_styles(tag)}".strip()
 
 
 class KbdConverter(TagConverterStrategy):
@@ -364,55 +447,7 @@ class KbdConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"{{{{{content}}}}} {self.get_styles(tag)}".strip()
-
-
-class ULConverter(TagConverterStrategy):
-    tag_name = 'ul'
-
-    def convert(self, tag, process_node, depth, new_depth) -> str:
-        result = ""
-        for child in tag.children:
-            result += process_node(child, new_depth)
-        return result
-
-
-class OLConverter(TagConverterStrategy):
-    tag_name = 'ol'
-
-    def convert(self, tag, process_node, depth, new_depth) -> str:
-        result = ""
-        for child in tag.children:
-            result += process_node(child, new_depth)
-        return result
-
-
-
-class LIConverter(TagConverterStrategy):
-    tag_name = 'li'
-
-    def convert(self, tag, process_node, depth, new_depth) -> str:
-        if tag.parent.name == "ol":
-            prefix = "#"
-        else:
-            prefix = "*"
-
-        content = ''
-        for child in tag.contents:
-            if isinstance(child, NavigableString):
-                content += child
-            elif child.name not in ['ul', 'ol']:
-                content += process_node(child, depth)
-
-        content = content.strip()
-        indent = prefix * depth
-        result = f"{indent} {content}\n"
-
-        for child in tag.contents:
-            if child.name in ['ul', 'ol']:
-                result += process_node(child, depth)
-
-        return result
+        return f"{{{{{content}}}}}{self.get_styles(tag)}".strip()
 
 
 class PreConverter(TagConverterStrategy):
@@ -420,7 +455,7 @@ class PreConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.decode_contents().strip()
-        return f"{{code}}\n{content}\n{{code}} {self.get_styles(tag)}"
+        return f"{{{{{content}}}}}{self.get_styles(tag)}".strip()
 
 
 class VarConverter(TagConverterStrategy):
@@ -428,7 +463,7 @@ class VarConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         content = tag.text.strip()
-        return f"_{content}_ {self.get_styles(tag)}".strip()
+        return f"_{content}_{self.get_styles(tag)}".strip()
 
 
 class BreakLineConverter(TagConverterStrategy):
@@ -436,13 +471,6 @@ class BreakLineConverter(TagConverterStrategy):
 
     def convert(self, tag) -> str:
         return "\n"
-
-
-class DivConverter(TagConverterStrategy):
-    tag_name = 'div'
-
-    def convert(self, tag) -> str:
-        return tag.decode_contents()
 
 
 class StrategyRegistry:

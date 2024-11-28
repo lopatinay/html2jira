@@ -1,4 +1,6 @@
-from bs4 import BeautifulSoup, NavigableString
+import re
+
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 from tag_converter.tag_converter_strategy import StrategyRegistry, TagConverterStrategy
 
@@ -8,7 +10,9 @@ class HtmlToJiraWikiConverter:
         self.registry = registry
 
     def convert(self, html_content: str) -> str:
-        soup = BeautifulSoup(html_content, "html.parser")
+        html = "".join(line.strip() for line in html_content.split("\n"))
+        soup = BeautifulSoup(html, "html.parser")
+
         if soup.body is None:
             body_tag = soup.new_tag('body')
             body_tag.extend(soup.contents)
@@ -19,26 +23,30 @@ class HtmlToJiraWikiConverter:
             return self.process_node(soup.body)
 
     def process_node(self, node, depth=0):
-        result = ""
-
         if isinstance(node, NavigableString):
-            text = str(node).strip()
-            if text:
-                return text
-            else:
-                return ''
+            text = node.text
+            return text
 
+        # Processing child nodes
+        for child in node.children:
+            if child.name in {"ul", "ol", "table"}:
+                strategy = self.registry.get_strategy(child.name)
+                result = strategy.convert(child, self.process_node, depth) + "\n\n"
+            else:
+                result = self.process_node(child)
+            if isinstance(result, str):
+                new_child = NavigableString(result)
+                child.replace_with(new_child)
+            elif isinstance(result, (Tag, NavigableString)):
+                child.replace_with(result)
+            else:
+                child.extract()
+
+        # Processing current node
         if strategy := self.registry.get_strategy(node.name):
-            new_depth = depth + 1 if node.name in {'ul', 'ol'} else depth
-            if strategy.tag_name in {"ul", "ol", "li"}:
-                return strategy.convert(node, self.process_node, depth, new_depth)
-            if strategy.tag_name in {"table", "thead", "tbody", "tr", "th", "td"}:
-                return strategy.convert(node, self.process_node)
             return strategy.convert(node)
-        else:
-            for child in node.children:
-                result += self.process_node(child, depth)
-            return result
+        # If there is no strategy, return the text content of the node
+        return node.get_text()
 
 
 if __name__ == "__main__":
@@ -53,6 +61,6 @@ if __name__ == "__main__":
     registry.register("img", CustomImgConverter())
     converter = HtmlToJiraWikiConverter(registry)
 
-    with open("templates/example_2.html") as fd:
+    with open("templates/combination.html") as fd:
         jira_wiki = converter.convert(fd.read())
         print(jira_wiki)
