@@ -438,6 +438,13 @@ class BreakLineConverter(TagConverterStrategy):
         return "\n"
 
 
+class DivConverter(TagConverterStrategy):
+    tag_name = 'div'
+
+    def convert(self, tag) -> str:
+        return tag.decode_contents()
+
+
 class StrategyRegistry:
     def __init__(self):
         self._strategies = {}

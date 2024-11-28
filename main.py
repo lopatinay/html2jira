@@ -53,6 +53,6 @@ if __name__ == "__main__":
     registry.register("img", CustomImgConverter())
     converter = HtmlToJiraWikiConverter(registry)
 
-    with open("templates/lists.html") as fd:
+    with open("templates/example_2.html") as fd:
         jira_wiki = converter.convert(fd.read())
         print(jira_wiki)
