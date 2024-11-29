@@ -1,4 +1,6 @@
-import re
+import json
+import os
+from html import unescape
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -10,7 +12,9 @@ class HtmlToJiraWikiConverter:
         self.registry = registry
 
     def convert(self, html_content: str) -> str:
-        html = "".join(line.strip() for line in html_content.split("\n"))
+        html = unescape(html_content)
+        html = html.strip('"').replace("\\n", "")
+        html = "".join(line.strip() for line in html.split("\n"))
         soup = BeautifulSoup(html, "html.parser")
 
         if soup.body is None:
@@ -54,13 +58,18 @@ if __name__ == "__main__":
         tag_name = 'img'
 
         def convert(self, tag) -> str:
-            return "[^Jira.png]"
+            src = tag.get('src', '#')
+            file_name = os.path.basename(src)
+            return f"[^{file_name}]"
 
     registry = StrategyRegistry()
     registry.register_all()
     registry.register("img", CustomImgConverter())
     converter = HtmlToJiraWikiConverter(registry)
 
-    with open("templates/combination.html") as fd:
+    with open("templates/example_2.html") as fd:
         jira_wiki = converter.convert(fd.read())
         print(jira_wiki)
+
+    with open("out.json", "w") as f:
+        json.dump(jira_wiki, f)
