@@ -69,7 +69,6 @@ class LIConverter(TagConverterStrategy):
 
         indent = prefix_char * depth
 
-        # Обрабатываем содержимое элемента <li>
         content = ''
         for child in tag.contents:
             if isinstance(child, Tag) and child.name in ['ul', 'ol']:
